@@ -1,0 +1,17 @@
+# 密钥和本地配置，绝不能进版本库
+.env
+
+# Python 虚拟环境
+.venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# IDE 配置
+.idea/
+
+# 运行数据：会话记忆与向量库（随程序运行自动生成，不上传）
+memory.json
+记忆.json
+chroma_data/
