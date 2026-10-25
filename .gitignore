@@ -16,5 +16,6 @@ memory.json
 记忆.json
 chroma_data/
 
-# �ݸ屾
+# 草稿本（练习文件，不上传）
 ceshi.py
+memory_*.json

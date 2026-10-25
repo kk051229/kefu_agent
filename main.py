@@ -99,7 +99,12 @@ def answer(messages,q):
     return reply
 
 def main():
-    memory.load()
+    global memory                                    # 声明：要改的是全局管家
+    user_id = input("请输入您的用户编号：").strip()
+    if not user_id:
+        user_id = "guest"                            # 没输入就用默认编号
+    memory = Memory.Memory(path=f"memory_{user_id}.json")   # 换管家：每人一个记忆文件
+    memory.load()                                    # 新管家读盘
     print("客服：您好，请问有什么可以帮您？（输入 exit 退出）")
     while True:
         try:
