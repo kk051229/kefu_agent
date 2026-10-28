@@ -1,3 +1,4 @@
+import time
 import json
 import logging
 import Memory
@@ -25,7 +26,16 @@ memory=Memory.Memory()
 # 给客户看的兜底话术：具体错误只进日志，不让客户看到
 FALLBACK_REPLY = "抱歉，系统暂时开小差了，请稍后再试~"
 
+def 计时器(func):
+    def 壳(*args, **kwargs):
+        开始 = time.time()
+        结果 = func(*args, **kwargs)
+        耗时 = time.time() - 开始
+        print(f"{func.__name__} 花了 {耗时:.3f} 秒")
+        return 结果
+    return 壳
 
+@计时器
 def answer(messages,q):
     messages.append({
             "role": "user",
