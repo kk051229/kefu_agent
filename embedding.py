@@ -1,35 +1,32 @@
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
 import numpy as np
 
-load_dotenv()
+from llm_base import 模型客户端
 
-class EmbeddingModel:
+
+class EmbeddingModel(模型客户端):
+    """硅基流动的 embedding 模型封装(bge-m3)。"""
+
     def __init__(self):
-        api_key = os.getenv("SILICONFLOW_API_KEY")
-        if not api_key:
-            raise RuntimeError("没有找到 SILICONFLOW_API_KEY,请在 .env 文件中配置")
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.siliconflow.cn/v1",
-        )                        # ← 到此为止，__init__ 收工
+        super().__init__(
+            "SILICONFLOW_API_KEY",
+            "https://api.siliconflow.cn/v1",
+            "没有找到 SILICONFLOW_API_KEY,请在 .env 文件中配置",
+        )
 
-    def embed(self, text):       # ← 翻译官是独立方法，text 从参数来
+    def embed(self, text):
+        """把一段文字翻译成向量(1024 个数字)。"""
         response = self.client.embeddings.create(
             model="BAAI/bge-m3",
             input=text,
         )
         return response.data[0].embedding
 
-def cosine(a,b):
-    """
-    量两个向量的夹角,返回-1到1,越接近1越像
 
-    """
-    return np.dot(a,b) / (np.linalg.norm(a)*np.linalg.norm(b))
+def cosine(a, b):
+    """量两个向量的夹角：返回 -1 到 1,越接近 1 越像。"""
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-   
+
 if __name__ == "__main__":
     model = EmbeddingModel()
     v = model.embed("退货政策")
