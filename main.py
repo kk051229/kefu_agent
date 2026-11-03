@@ -22,7 +22,7 @@ SYSTEM = """你是一名工作经验丰富、态度良好的专业客服。
 
 llm = DeepSeekLLM()
 memory=Memory.Memory()
-
+MAX_MESSAGES=40
 # 给客户看的兜底话术：具体错误只进日志，不让客户看到
 FALLBACK_REPLY = "抱歉，系统暂时开小差了，请稍后再试~"
 
@@ -34,6 +34,27 @@ def 计时器(func):
         print(f"{func.__name__} 花了 {耗时:.3f} 秒")
         return 结果
     return 壳
+
+def 理发(messages):
+    if len(messages) > MAX_MESSAGES:
+        多出来的 = len(messages) - MAX_MESSAGES
+        老消息 = messages[1:1+多出来的]          # ① 拿出要砍的（不含 system）
+
+        摘要 = llm.chat(                          # ② 交给模型写摘要
+            老消息 + [                             #    列表拼接：老对话 + 一句指令
+                {"role": "user",
+                 "content": "请把以上对话总结成 100 字以内的摘要，必须保留：用户的名字、身份、诉求、承诺等关键信息。"},
+            ]
+        ).choices[0].message.content
+
+        del messages[1:1+多出来的+1]              # ③ 删掉老消息（+1：给摘要腾一个位置）
+        messages.insert(1, {                      # ④ 摘要插回第 1 条（紧挨 system）
+            "role": "system",
+            "content": f"之前的对话摘要：{摘要}",
+        })
+
+
+
 
 @计时器
 def answer(messages,q):
@@ -104,7 +125,7 @@ def answer(messages,q):
     })
 
 
-  
+    理发(messages)
     memory.persist()
     return reply
 

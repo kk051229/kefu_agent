@@ -1,7 +1,13 @@
+import os
+import json
+
 import embedding
 import chromadb
 
 embedder=embedding.EmbeddingModel()
+
+# 向量缓存：启动时优先读本地缓存，零 API 成本、断粮也能跑
+向量缓存文件 = "vectors.json"
 
 # 知识库：公司的政策文档（RAG v0 版）
 # 每条知识 = 一段内容 + 一组关键词（检索时靠关键词匹配）
@@ -28,8 +34,18 @@ KNOWLEDGE = [
     },
 ]
 
-for item in KNOWLEDGE:
-    item["vector"]=embedder.embed(item["content"])
+if os.path.exists(向量缓存文件):
+    # 缓存存在：零 API 读向量（启动快、不花钱、断粮也能跑）
+    with open(向量缓存文件, "r", encoding="utf-8") as f:
+        缓存 = json.load(f)
+    for i, item in enumerate(KNOWLEDGE):
+        item["vector"] = 缓存[i]
+else:
+    # 缓存不存在：调 API 向量化，顺手把向量存进缓存（下次就不用调了）
+    for item in KNOWLEDGE:
+        item["vector"] = embedder.embed(item["content"])
+    with open(向量缓存文件, "w", encoding="utf-8") as f:
+        json.dump([item["vector"] for item in KNOWLEDGE], f, ensure_ascii=False)
 
 
 

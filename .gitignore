@@ -19,3 +19,4 @@ chroma_data/
 # 草稿本（练习文件，不上传）
 ceshi.py
 memory_*.json
+vectors.json
