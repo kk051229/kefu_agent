@@ -1,8 +1,9 @@
 import json
 import os
 class Memory:
-    def __init__(self,path="memory.json"):
+    def __init__(self,path="memory.json",user_id=None):
         self.path=path
+        self.user_id=user_id        # 这个管家伺候的是谁（登录后才知道）
         self.messages=[]
 
     def __str__(self):

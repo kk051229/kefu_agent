@@ -1,16 +1,25 @@
 import os
 import json
+import hashlib
 
 import embedding
 import chromadb
+import chunking
 
-embedder=embedding.EmbeddingModel()
+embedder = embedding.EmbeddingModel()
 
-# 向量缓存：启动时优先读本地缓存，零 API 成本、断粮也能跑
+# 向量缓存：键 = 内容的 SHA256 指纹，值 = 向量
+# 用"内容指纹"而不是"位置对齐"：知识库增删改都不会让向量错位
 向量缓存文件 = "vectors.json"
 
-# 知识库：公司的政策文档（RAG v0 版）
-# 每条知识 = 一段内容 + 一组关键词（检索时靠关键词匹配）
+
+def 内容指纹(text):
+    """给一段文字算 SHA256 指纹：内容改一个字符，指纹就完全不同。"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# 知识库：公司的政策文档（RAG v2 版：20 条，向量检索）
+# keywords 是 v0 关键词检索时代留下的，现在靠向量检索用不到，留作后续混合检索
 KNOWLEDGE = [
     {
         "content": "退货政策：本店支持 7 天无理由退货。商品需保持完好、不影响二次销售。买家自行承担退货运费；如因商品质量问题退货，运费由本店承担。申请退货请提供订单号，退款将在收到退货后 3 个工作日内原路退回。",
@@ -32,22 +41,107 @@ KNOWLEDGE = [
         "content": "客服工作时间：在线客服服务时间为每天 9:00~21:00。非工作时间请留言，客服会在次日第一时间回复。",
         "keywords": ["客服", "工作时间", "几点", "人工"],
     },
+    {
+        "content": "退换货例外：定制商品、生鲜食品、已拆封的贴身用品（如内衣、袜子）、激活后的数码产品不支持 7 天无理由退货。如商品存在质量问题，仍可按质量问题流程处理。",
+        "keywords": ["定制", "生鲜", "贴身", "拆封", "例外"],
+    },
+    {
+        "content": "质量问题处理：收到商品发现破损、错发、漏发或存在质量缺陷，请在签收后 48 小时内联系客服并提供照片或视频。核实后可选择免费补发、换货或退款，相关运费由本店承担。",
+        "keywords": ["破损", "错发", "漏发", "质量", "补发", "照片"],
+    },
+    {
+        "content": "退款到账时间：退款审核通过后原路退回。支付宝、微信一般 1~3 个工作日到账；银行卡 3~7 个工作日到账。具体以支付渠道为准，超时未到账请联系客服查询。",
+        "keywords": ["退款", "到账", "几天", "银行卡", "支付宝", "微信"],
+    },
+    {
+        "content": "订单取消：未发货订单可在订单详情页直接取消，款项原路退回；已发货订单无法直接取消，可拒收包裹，包裹退回后自动退款。",
+        "keywords": ["取消", "订单", "拒收", "未发货"],
+    },
+    {
+        "content": "修改收货地址：订单未发货前可联系客服修改地址；已发货订单无法修改，请联系快递员协商转寄，转寄费用由买家承担。",
+        "keywords": ["修改地址", "收货地址", "转寄", "发货"],
+    },
+    {
+        "content": "物流异常：物流信息超过 48 小时未更新，或包裹显示签收但未收到，请联系客服核实。确认丢件后，本店将免费补发或全额退款。",
+        "keywords": ["物流", "异常", "丢件", "没收到", "未更新"],
+    },
+    {
+        "content": "支付方式：支持微信支付、支付宝、银行卡（储蓄卡、信用卡）。暂不支持货到付款和海外信用卡。",
+        "keywords": ["支付", "付款", "微信", "支付宝", "银行卡", "货到付款"],
+    },
+    {
+        "content": "优惠券规则：优惠券有使用门槛和有效期，单笔订单限用一张，不与其它优惠券叠加。退款时优惠券按原规则退回，已过期的不补发。",
+        "keywords": ["优惠券", "满减", "叠加", "有效期", "门槛"],
+    },
+    {
+        "content": "会员积分：消费 1 元累计 1 积分，100 积分可抵 1 元。积分有效期为 12 个月，过期自动清零。退货后对应积分将扣回。",
+        "keywords": ["积分", "会员", "抵扣", "清零"],
+    },
+    {
+        "content": "发票换开：电子发票开具后如需修改抬头或换开，请在开票后 30 天内联系客服，提供订单号和正确抬头。跨月换开需先红冲原发票。",
+        "keywords": ["发票", "换开", "抬头", "红冲", "修改"],
+    },
+    {
+        "content": "预售规则：预售商品需支付定金锁定库存，尾款在页面标注时间内支付，逾期未付视为放弃，定金不退。预售商品发货时间以商品页标注为准。",
+        "keywords": ["预售", "定金", "尾款", "发货"],
+    },
+    {
+        "content": "生鲜售后：生鲜商品请当面验货，发现变质、缺斤少两请在签收后 24 小时内拍照联系客服。核实后按坏果比例赔付或全额退款。",
+        "keywords": ["生鲜", "水果", "坏了", "变质", "赔付", "验货"],
+    },
+    {
+        "content": "换货流程：尺码不合适、颜色不喜欢等非质量问题，可在签收后 7 天内申请换货，商品需保持完好，换货运费由买家承担；质量问题换货运费由本店承担。",
+        "keywords": ["换货", "尺码", "颜色", "大小"],
+    },
+    {
+        "content": "投诉与人工服务：对客服处理结果不满意，可要求转接人工客服，或在订单详情页提交投诉工单。投诉将在 24 小时内由专人回电处理。",
+        "keywords": ["投诉", "人工", "转人工", "工单"],
+    },
+    {
+        "content": "价格保护：商品签收后 7 天内，如同一商品在本店降价，可申请退差价。需提供订单号和降价截图，每个订单限申请一次。",
+        "keywords": ["价保", "降价", "差价", "价格保护"],
+    },
 ]
 
-if os.path.exists(向量缓存文件):
-    # 缓存存在：零 API 读向量（启动快、不花钱、断粮也能跑）
+
+# ============ 长文档：切块后和小条目一起入库 ============
+# 短政策天然就是"一条 = 一块"；长文档必须先切块，否则整篇一个向量会被平均掉。
+文档块们 = chunking.加载文档("docs")
+
+# 统一成"条目"：每条都必须有 id 和 content
+# 短条目沿用 p0~p19（评测集认这些 id），文档块用 d0_0、d0_1……（d=文档，0=第几个文件）
+for i, item in enumerate(KNOWLEDGE):
+    item["id"] = f"p{i}"
+条目们 = KNOWLEDGE + 文档块们
+
+
+def 读取缓存():
+    """读向量缓存；兼容旧版“列表”格式，自动迁移成“哈希字典”格式。"""
+    if not os.path.exists(向量缓存文件):
+        return {}
     with open(向量缓存文件, "r", encoding="utf-8") as f:
         缓存 = json.load(f)
-    for i, item in enumerate(KNOWLEDGE):
-        item["vector"] = 缓存[i]
-else:
-    # 缓存不存在：调 API 向量化，顺手把向量存进缓存（下次就不用调了）
-    for item in KNOWLEDGE:
-        item["vector"] = embedder.embed(item["content"])
+    if isinstance(缓存, list):
+        # 旧格式按位置对齐；此刻顺序还对，趁机迁移成哈希字典
+        return {内容指纹(item["content"]): vec for item, vec in zip(KNOWLEDGE, 缓存)}
+    return 缓存
+
+
+缓存 = 读取缓存()
+缓存有更新 = False
+
+for item in 条目们:
+    指纹 = 内容指纹(item["content"])
+    if 指纹 in 缓存:
+        item["vector"] = 缓存[指纹]                       # 命中：零 API 成本
+    else:
+        item["vector"] = embedder.embed(item["content"])  # 未命中：调 API 并补进缓存
+        缓存[指纹] = item["vector"]
+        缓存有更新 = True
+
+if 缓存有更新:
     with open(向量缓存文件, "w", encoding="utf-8") as f:
-        json.dump([item["vector"] for item in KNOWLEDGE], f, ensure_ascii=False)
-
-
+        json.dump(缓存, f, ensure_ascii=False)             # 下次启动直接命中
 
 
 client = chromadb.PersistentClient(path="chroma_data")
@@ -57,7 +151,14 @@ collection = client.get_or_create_collection(
 )
 
 collection.upsert(
-    ids=[f"p{i}" for i in range(len(KNOWLEDGE))],
-    documents=[item["content"] for item in KNOWLEDGE],
-    embeddings=[item["vector"] for item in KNOWLEDGE],
+    ids=[item["id"] for item in 条目们],
+    documents=[item["content"] for item in 条目们],
+    embeddings=[item["vector"] for item in 条目们],
 )
+
+# 文档改短了、块变少了 → 旧 id 还赖在库里，必须清掉，否则会检索出不存在的"幽灵段落"
+旧ids = set(collection.get()["ids"])
+新ids = {item["id"] for item in 条目们}
+过期ids = 旧ids - 新ids
+if 过期ids:
+    collection.delete(ids=list(过期ids))

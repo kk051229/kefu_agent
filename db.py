@@ -27,31 +27,66 @@ def get_order(order_id):
     finally:
         # 不管查询成功还是报错，都保证关闭连接，否则连接会越攒越多
         conn.close()
-def update_order(order_id,new_address):
+# ============ 用户表（登录用） ============
+def get_user(user_id):
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
+def create_user(user_id, password_hash):
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            count=cursor.execute("UPDATE orders SET address = %s WHERE order_id = %s", (new_address, order_id))
+            cursor.execute(
+                "INSERT INTO users (user_id, password_hash) VALUES (%s, %s)",
+                (user_id, password_hash),
+            )
+            conn.commit()
+            return True
+    finally:
+        conn.close()
+
+# 注意：凡是"改别人数据"的语句，WHERE 里必须同时带上 user_id
+# —— 只凭 order_id 更新，等于谁拿到订单号都能改别人的单。
+def update_order(order_id,new_address,user_id):
+    conn = pymysql.connect(**DB_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            count=cursor.execute(
+                "UPDATE orders SET address = %s WHERE order_id = %s AND user_id = %s",
+                (new_address, order_id, user_id),
+            )
             conn.commit()
             return count
     finally:
         conn.close()
 
-def update_order_status(order_id,new_status):
+def update_order_status(order_id,new_status,user_id):
     conn=pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor(pymysql.cursors.DictCursor)as cursor:
-            count=cursor.execute("UPDATE orders SET status =%s WHERE order_id = %s", (new_status,order_id))
+            count=cursor.execute(
+                "UPDATE orders SET status = %s WHERE order_id = %s AND user_id = %s",
+                (new_status, order_id, user_id),
+            )
             conn.commit()
             return count
     finally:
         conn.close()
 
-def create_ticket(question):
+def create_ticket(question, user_id=None):
+    """工单记下是谁提的，人工客服才知道该找谁核实。"""
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("INSERT INTO tickets (content) VALUES (%s)",(question,))
+            cursor.execute(
+                "INSERT INTO tickets (content, user_id) VALUES (%s, %s)",
+                (question, user_id),
+            )
             conn.commit()
             return True
     finally:

@@ -1,0 +1,23 @@
+# 不進镜像的东西：秘密、本地环境、缓存、临时数据
+.env
+.venv
+__pycache__
+*.pyc
+.git
+.gitignore
+.pytest_cache
+.idea
+.vscode
+
+# 每个人本地的对话记忆，不能打进镜像
+memory_*.json
+
+# 本地 Chroma 数据库：容器启动时会用 vectors.json 的缓存重建（不花钱）
+chroma_data
+
+# 测试和草稿
+tests
+考试卷.md
+明天看这里.md
+ceshi.py
+实验.py
