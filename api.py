@@ -84,7 +84,17 @@ def 注册(请求: LoginRequest):
 
 @app.post("/login")
 def 登录(请求: LoginRequest):
-    """账号密码换令牌。401 = 账号或密码不对。"""
+    """账号密码换令牌。401 = 账号或密码不对，429 = 试得太频繁。"""
+    # 防暴力猜密码：同一个账号每分钟最多试 5 次
+    键 = "login:" + 请求.user_id
+    if not 限流.允许(键, 上限=限流.登录每分钟上限):
+        等 = 限流.建议等待秒数(键)
+        raise HTTPException(
+            status_code=429,
+            detail=f"尝试太频繁，请 {等} 秒后再试",
+            headers={"Retry-After": str(等)},
+        )
+
     try:
         token = auth.登录(请求.user_id, 请求.password)
     except auth.登录失败 as e:

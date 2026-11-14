@@ -116,6 +116,23 @@ def test_重复注册返回409(monkeypatch):
     assert r.status_code == 409
 
 
+def test_登录尝试太频繁返回429(monkeypatch):
+    """防暴力猜密码：同一个账号每分钟最多试 5 次。"""
+    _装上假用户表(monkeypatch)
+
+    for _ in range(限流.登录每分钟上限):
+        r = client.post("/login", json={"user_id": "u001", "password": "错的"})
+        assert r.status_code == 401
+
+    # 第 6 次直接拦下——连正确密码都不让试了
+    r = client.post("/login", json={"user_id": "u001", "password": "123456"})
+    assert r.status_code == 429
+    assert "Retry-After" in r.headers
+
+    # 别的账号不受影响
+    assert client.post("/login", json={"user_id": "u002", "password": "123456"}).status_code == 200
+
+
 # ============ 没令牌寸步难行 ============
 
 def test_没令牌访问chat返回401():

@@ -1,8 +1,43 @@
+import asyncio
+import queue
+import threading
+
 import streamlit as st
 import auth
 import graph
 
 import Memory
+
+
+def 流式回答(管家, q):
+    """把异步大脑桥接成同步生成器——st.write_stream 只认同步的。
+
+    思路：开一个后台线程跑 asyncio，每生成一片就塞进队列；
+    主线程从队列里取，取到一片 yield 一片。队列空就阻塞等。
+    """
+    队列 = queue.Queue()
+    结束 = object()
+
+    def 后台跑():
+        async def 收集():
+            async for 片 in graph.answer_stream_async(管家, q):
+                队列.put(片)
+
+        try:
+            asyncio.run(收集())
+        except Exception as e:                    # 兜底：界面上要看得见
+            队列.put(f"\n[出错了：{e}]")
+        finally:
+            队列.put(结束)
+
+    线程 = threading.Thread(target=后台跑, daemon=True)
+    线程.start()
+    while True:
+        片 = 队列.get()
+        if 片 is 结束:
+            break
+        yield 片
+
 
 st.title("客服小助手")
 
@@ -45,7 +80,7 @@ if user_id not in st.session_state.memories:
     m.load()                                    # 启动读盘
     st.session_state.memories[user_id] = m
 
-# ④ 拿出这个用户的管家（不再写全局 main.memory：多个人同时用也不会串号）
+# ④ 拿出这个用户的管家（多个人同时用也不会串号）
 管家 = st.session_state.memories[user_id]
 
 # ⑤ 画历史
@@ -53,9 +88,9 @@ for msg in 管家.messages:
     if msg["role"] in ("user", "assistant"):
         st.chat_message(msg["role"]).write(msg["content"])
 
-# ⑥ 聊天（走 LangGraph 版大脑）
+# ⑥ 聊天：边生成边显示（流式）
 q = st.chat_input("有什么可以帮您？")
 if q:
     st.chat_message("user").write(q)
-    reply = graph.answer(管家, q)
-    st.chat_message("assistant").write(reply)
+    with st.chat_message("assistant"):
+        st.write_stream(流式回答(管家, q))

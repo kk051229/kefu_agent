@@ -14,26 +14,31 @@ import time
 from collections import defaultdict, deque
 
 每分钟上限 = 10
+登录每分钟上限 = 5      # 登录接口单独一套：密码可以错，但不能无限试
 窗口秒数 = 60
 
-_记录 = defaultdict(deque)      # user_id → 最近 60 秒内每次请求的时间戳
+_记录 = defaultdict(deque)      # 键 → 最近 60 秒内每次请求的时间戳
 
 
-def 允许(user_id):
-    """这一下能不能放行？放行就顺手记一笔。"""
+def 允许(键, 上限=每分钟上限):
+    """这一下能不能放行？放行就顺手记一笔。
+
+    键 一般就是 user_id；登录用它自己的键（"login:" + user_id），
+    这样猜密码和正常聊天各算各的额度，互不挤占。
+    """
     现在 = time.time()
-    队列 = _记录[user_id]
+    队列 = _记录[键]
     while 队列 and 现在 - 队列[0] >= 窗口秒数:
         队列.popleft()
-    if len(队列) >= 每分钟上限:
+    if len(队列) >= 上限:
         return False
     队列.append(现在)
     return True
 
 
-def 建议等待秒数(user_id):
+def 建议等待秒数(键):
     """被限流时，告诉用户大概还要等几秒。"""
-    队列 = _记录.get(user_id)
+    队列 = _记录.get(键)
     if not 队列:
         return 0
     return max(1, int(窗口秒数 - (time.time() - 队列[0])))
