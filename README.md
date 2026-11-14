@@ -18,6 +18,7 @@ function calling、记忆系统、RAG 检索均为自己实现；主流程已迁
 - **三种形态**：终端 / Streamlit 网页 / FastAPI 接口，共用同一套大脑
 - **流式对话**：`POST /chat/stream`（SSE）边生成边返回；`/stream_demo` 是纯模型演示
 - **网页流式**：Streamlit 聊天页边生成边显示（`st.write_stream` + 线程桥接异步生成器）
+- **对话历史**：`GET /history` 查看、`DELETE /history` 清空（只清聊天记录，不动业务数据）
 
 ## 技术栈
 
@@ -47,7 +48,7 @@ function calling、记忆系统、RAG 检索均为自己实现；主流程已迁
 | knowledge.py | 政策知识库 + 长文档切块 + ChromaDB 集合管理 |
 | chunking.py | 长文档切块（按段落、按句、标题绑定、重叠） |
 | rag_eval.py | RAG 评测集（34 题）+ 阈值扫描 |
-| api.py | FastAPI 入口（/login、/register、/chat、/chat/stream、/health、/stats、/stream_demo） |
+| api.py | FastAPI 入口（/login、/register、/chat、/chat/stream、/history、/orders、/health、/stats） |
 | app.py | Streamlit 网页入口（先登录再聊天，回复流式显示） |
 | 限流.py | 按用户的滑动窗口限流 |
 | migrate_auth.py | 给老数据库补 users 表 / orders.user_id（幂等，不动数据） |
@@ -162,7 +163,7 @@ ask ──有工具──→ execute_tools ──→ answer ──┐
 
 **工程化**
 
-- 69 条 pytest 单测：工具分支与越权、图四条路径（含异常）、流式路径、HTTP 校验、登录/令牌、限流、切块器；
+- 72 条 pytest 单测：工具分支与越权、图四条路径（含异常）、流式路径、HTTP 校验、登录/令牌、限流、历史记录、切块器；
 - `/health` 探活（数据库不通返回 503）、`/stats` 看累计 token 用量；
 - 限流：聊天每用户每分钟 10 次，登录每账号每分钟 5 次（防暴力猜密码），超限返回 429 + `Retry-After`；
 - 日志：异常只进日志，用户只看到兜底话术。

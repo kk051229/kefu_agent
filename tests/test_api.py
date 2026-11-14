@@ -6,6 +6,8 @@ TestClient 是 FastAPI 自带的测试客户端：不用真的起 uvicorn，
 登录之后，凡是"要身份"的接口都得先换一张令牌：
 POST /login 用假用户表换 token → 之后每个请求带 Authorization 头。
 """
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -288,3 +290,46 @@ def test_流式接口_逐条返回(tmp_path, monkeypatch):
 def test_流式接口_没令牌返回401():
     r = client.post("/chat/stream", json={"message": "你好"})
     assert r.status_code == 401
+
+
+# ============ 对话历史 ============
+
+def test_历史只返回用户和客服(tmp_path, monkeypatch):
+    """system 人设、tool 原始输出、工具轮的空 assistant 都不该暴露给前端。"""
+    token = _拿令牌(monkeypatch)
+    管家 = _假管家(tmp_path)
+    管家.messages = [
+        {"role": "system", "content": "人设"},
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "您好呀～"},
+        {"role": "tool", "content": "工具原始输出"},
+        {"role": "assistant", "content": None},
+    ]
+    monkeypatch.setattr(api, "找管家", lambda user_id: 管家)
+
+    r = client.get("/history", headers=token)
+
+    assert r.status_code == 200
+    assert r.json()["messages"] == [
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "您好呀～"},
+    ]
+
+
+def test_清空历史并且落盘(tmp_path, monkeypatch):
+    token = _拿令牌(monkeypatch)
+    管家 = _假管家(tmp_path)
+    管家.messages = [{"role": "user", "content": "你好"}]
+    monkeypatch.setattr(api, "找管家", lambda user_id: 管家)
+
+    r = client.delete("/history", headers=token)
+
+    assert r.status_code == 200
+    assert 管家.messages == []
+    # 不只是内存里清了，文件也真的写成空列表了
+    assert json.loads((tmp_path / "memory_api_test.json").read_text(encoding="utf-8")) == []
+
+
+def test_历史接口要登录():
+    assert client.get("/history").status_code == 401
+    assert client.delete("/history").status_code == 401
