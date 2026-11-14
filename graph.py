@@ -52,9 +52,13 @@ def 判断走哪(state):
     return "direct"
 
 
-async def 节点_执行工具(state):
-    """回填"模型喊了什么" + 逐个执行 + 回填"工具答了什么"。"""
-    msg = state["msg"]
+async def 执行工具并回填(msg, 当前用户):
+    """把模型喊的工具逐个执行，返回要追加的消息（图版和流式版共用这段）。
+
+    返回两条牌子：
+    - assistant：模型喊了什么（带 tool_calls，后面要原样存进历史）
+    - tool：工具答了什么（带 tool_call_id，和上面的调用配对）
+    """
     新增消息 = [{
         "role": "assistant",
         "content": msg.content,
@@ -71,9 +75,6 @@ async def 节点_执行工具(state):
         ],
     }]
 
-    # 身份从管家拿（登录态），不从模型参数拿 —— 见 tools.execute 的说明
-    当前用户 = getattr(state["memory"], "user_id", None)
-
     for tc in msg.tool_calls:
         name = tc.function.name
         try:
@@ -88,7 +89,13 @@ async def 节点_执行工具(state):
             "content": result,
         })
 
-    return {"messages": 新增消息}
+    return 新增消息
+
+
+async def 节点_执行工具(state):
+    """图里的工具节点：身份从管家拿（登录态），不从模型参数拿。"""
+    当前用户 = getattr(state["memory"], "user_id", None)
+    return {"messages": await 执行工具并回填(state["msg"], 当前用户)}
 
 
 async def 节点_第二轮(state):
@@ -157,6 +164,58 @@ async def answer_async(memory, q):
 def answer(memory, q):
     """同步入口（终端 / Streamlit 用）：把异步图包一层。"""
     return asyncio.run(answer_async(memory, q))
+
+
+# ============ 流式版：一边生成一边交卷 ============
+
+async def answer_stream_async(memory, q):
+    """流式版大脑：每生成一小片，就 yield 一小片。
+
+    和 answer_async 的区别只在"怎么交卷"：
+    - 普通版：整段生成完，一次性 return
+    - 流式版：出来一片交一片，API 层边收边转发给用户
+
+    为什么第一轮不能流：模型可能正在决定"要不要调工具"，
+    这时候没有话可说。所以第一轮先正常问（不流），
+    如果它喊了工具，执行完再流第二轮（组织话术）；
+    如果它直接回答（打招呼），那就把整段一次给出去。
+    """
+    messages = memory.messages
+    main.确保人设(messages)
+    messages.append({"role": "user", "content": q})
+
+    reply = main.FALLBACK_REPLY
+    try:
+        response = await main.llm.achat(messages, tools=tools.TOOLS)
+        msg = response.choices[0].message
+
+        if not msg.tool_calls:
+            # 直接回复：模型已经整段生成完了，没有流的意义，一次给
+            reply = msg.content or main.FALLBACK_REPLY
+            yield reply
+        else:
+            # 工具轮：先把"喊了什么/答了什么"回填进历史
+            messages.extend(await 执行工具并回填(msg, memory.user_id))
+
+            # 第二轮才是真流式：出来一片，交一片
+            片们 = []
+            async for chunk in main.llm.astream(messages):
+                if not chunk.choices:              # 最后一片可能只带 usage，没有内容
+                    continue
+                小片 = chunk.choices[0].delta.content
+                if 小片:
+                    片们.append(小片)
+                    yield 小片
+            reply = "".join(片们) or main.FALLBACK_REPLY
+    except Exception:
+        main.logger.exception("流式回答失败")
+        reply = main.FALLBACK_REPLY
+        yield reply
+    finally:
+        # 不管用户看到多少，历史都要收尾：写回回复 → 理发 → 落盘
+        messages.append({"role": "assistant", "content": reply})
+        await main.理发_async(messages)
+        await asyncio.to_thread(memory.persist)
 
 
 if __name__ == "__main__":

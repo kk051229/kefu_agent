@@ -68,11 +68,19 @@ class DeepSeekLLM(模型客户端):
         return response
 
     async def astream(self, messages):
-        """流式版:返回一个异步生成器,模型生成一小片就交出一小片。"""
-        return await self.取异步客户端().chat.completions.create(
+        """流式版：模型生成一小片就交出一小片（异步生成器）。
+
+        最后一片会带 usage，顺手记账——不加 stream_options 的话，
+        流式请求烧的 token 在 /stats 里是统计不到的。
+        """
+        stream = await self.取异步客户端().chat.completions.create(
             model="deepseek-chat",
             messages=messages,
             stream=True,
+            stream_options={"include_usage": True},
             timeout=30,
             temperature=0.3,
         )
+        async for chunk in stream:
+            _记用量(chunk)          # 只有最后一片带 usage，_记用量 内部会判空
+            yield chunk

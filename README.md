@@ -16,7 +16,7 @@ function calling、记忆系统、RAG 检索均为自己实现；主流程已迁
 - **政策问答（RAG）**：20 条短政策 + 长文档切块，向量检索 top-3，域外问题拒答不瞎编
 - **多轮 + 跨会话记忆**：按用户分文件存储，超长对话自动摘要；关程序重开，对话不丢
 - **三种形态**：终端 / Streamlit 网页 / FastAPI 接口，共用同一套大脑
-- **流式输出**：`/stream_demo` 演示逐字返回
+- **流式对话**：`POST /chat/stream`（SSE）边生成边返回；`/stream_demo` 是纯模型演示
 
 ## 技术栈
 
@@ -46,7 +46,7 @@ function calling、记忆系统、RAG 检索均为自己实现；主流程已迁
 | knowledge.py | 政策知识库 + 长文档切块 + ChromaDB 集合管理 |
 | chunking.py | 长文档切块（按段落、按句、标题绑定、重叠） |
 | rag_eval.py | RAG 评测集（34 题）+ 阈值扫描 |
-| api.py | FastAPI 入口（/login、/register、/chat、/health、/stats、/stream_demo） |
+| api.py | FastAPI 入口（/login、/register、/chat、/chat/stream、/health、/stats、/stream_demo） |
 | app.py | Streamlit 网页入口（先登录再聊天） |
 | 限流.py | 按用户的滑动窗口限流 |
 | migrate_auth.py | 给老数据库补 users 表 / orders.user_id（幂等，不动数据） |
@@ -100,6 +100,15 @@ curl -X POST http://127.0.0.1:8000/chat \
   -d '{"message":"帮我查订单 kx666"}'
 ```
 
+流式版（`-N` 关掉 curl 的缓冲，才能看到字一片片到达）：
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/chat/stream \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"帮我查订单 kx666"}'
+```
+
 ## 部署
 
 ```bash
@@ -121,6 +130,13 @@ ask ──有工具──→ execute_tools ──→ answer ──┐
 - `execute_tools`：执行工具，结果以 `role="tool"` 回填（带 `tool_call_id` 与调用配对）；
 - `answer`：不带工具再问一次模型，把工具结果组织成对用户的话术；
 - `收尾`：回填最终回复 → 理发 → 落盘。管家（memory）从参数传入，不用全局变量，多用户并发不串号。
+
+**流式对话（SSE）**
+
+- 第一轮（决定调不调工具）不流；有工具时第二轮 `stream=True`，边生成边转发；
+- 每片 `data: {"text": ...}`，结束发 `data: [DONE]`；
+- `stream_options={"include_usage": True}` 让流式请求的 token 也进 `/stats`；
+- 生成器 `finally` 收尾：写回回复 → 理发 → 落盘，中途断开也不留半截。
 
 **RAG 检索（检索 → 增强 → 生成）**
 

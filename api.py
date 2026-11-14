@@ -5,6 +5,7 @@
 服务器从令牌里解出 user_id —— 客户端自己报的编号一律不认。
 """
 import asyncio
+import json
 import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -146,10 +147,11 @@ def 查订单(order_id: str, user_id: str = Depends(当前用户)):
 
 async def 流式生成器(q):
     """异步生成器：模型吐一片，就 yield 一片（函数不结束，下次接着跑）。"""
-    stream = await main.llm.astream([{"role": "user", "content": q}])
-    async for chunk in stream:
-        小片 = chunk.choices[0].delta.content   # 流式给的是 delta（增量）
-        if 小片:                                 # 首尾 chunk 的 content 通常是 None
+    async for chunk in main.llm.astream([{"role": "user", "content": q}]):
+        if not chunk.choices:                    # 最后一片只带 usage，没有正文
+            continue
+        小片 = chunk.choices[0].delta.content    # 流式给的是 delta（增量）
+        if 小片:                                  # 首尾 chunk 的 content 通常是 None
             yield 小片
 
 
@@ -184,3 +186,44 @@ async def chat(请求: ChatRequest, user_id: str = Depends(当前用户)):
     管家 = await asyncio.to_thread(找管家, user_id)
     reply = await graph.answer_async(管家, q)   # LangGraph 版大脑
     return {"reply": reply}                     # 客服的话包成 JSON 发回
+
+
+@app.post("/chat/stream")
+async def chat_stream(请求: ChatRequest, user_id: str = Depends(当前用户)):
+    """流式版客服：SSE 协议，一行一条 data，最后一条是 [DONE]。
+
+    和普通 /chat 的区别只有一个：边生成边发，用户不用等整段说完。
+    """
+    q = 请求.message.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="message 不能为空")
+
+    if not 限流.允许(user_id):
+        等 = 限流.建议等待秒数(user_id)
+        raise HTTPException(
+            status_code=429,
+            detail=f"请求太频繁啦，请 {等} 秒后再试",
+            headers={"Retry-After": str(等)},
+        )
+
+    管家 = await asyncio.to_thread(找管家, user_id)
+
+    async def 事件流():
+        try:
+            async for 片 in graph.answer_stream_async(管家, q):
+                # SSE 的规矩：每条消息以 "data: " 开头，空行结尾。
+                # 包成 JSON 是为了把换行、引号安全地转义掉。
+                yield f"data: {json.dumps({'text': 片}, ensure_ascii=False)}\n\n"
+        except Exception:
+            logger.exception("流式接口出错")
+            yield f"data: {json.dumps({'error': '系统开小差了，请稍后再试'}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"        # 结束标记：告诉客户端别等了
+
+    return StreamingResponse(
+        事件流(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # 告诉 Nginx 别攒着，来一片转一片
+        },
+    )

@@ -245,3 +245,29 @@ def test_限流按用户分开算(tmp_path, monkeypatch):
     # A 被限流了，B 不受影响
     assert client.post("/chat", json={"message": "你好"}, headers=tokenA).status_code == 429
     assert client.post("/chat", json={"message": "你好"}, headers=tokenB).status_code == 200
+
+
+# ============ 流式 /chat/stream ============
+
+def test_流式接口_逐条返回(tmp_path, monkeypatch):
+    token = _拿令牌(monkeypatch)
+    monkeypatch.setattr(api, "找管家", lambda user_id: _假管家(tmp_path))
+
+    async def 假流(管家, q):
+        yield "你"
+        yield "好"
+
+    monkeypatch.setattr(api.graph, "answer_stream_async", 假流)
+
+    r = client.post("/chat/stream", json={"message": "你好"}, headers=token)
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert '"text": "你"' in r.text
+    assert '"text": "好"' in r.text
+    assert r.text.rstrip().endswith("[DONE]")     # 结束标记
+
+
+def test_流式接口_没令牌返回401():
+    r = client.post("/chat/stream", json={"message": "你好"})
+    assert r.status_code == 401

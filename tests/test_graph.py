@@ -138,3 +138,73 @@ def test_对话会写进记忆文件(tmp_path, monkeypatch):
 
     存下来的 = json.loads((tmp_path / "memory_test.json").read_text(encoding="utf-8"))
     assert 存下来的[-1] == {"role": "assistant", "content": "好的"}
+
+
+# ============ 流式版 ============
+
+def _收集流(管家, q):
+    """把异步生成器整个跑完，收集所有小片。"""
+    片们 = []
+
+    async def 跑():
+        async for 片 in graph.answer_stream_async(管家, q):
+            片们.append(片)
+
+    asyncio.run(跑())
+    return 片们
+
+
+def test_流式_直接路整段吐出(tmp_path, monkeypatch):
+    async def 假achat(messages, tools=None):
+        return 假回复("您好呀～")
+
+    monkeypatch.setattr(main.llm, "achat", 假achat)
+    管家 = 建管家(tmp_path)
+
+    片们 = _收集流(管家, "你好")
+
+    assert "".join(片们) == "您好呀～"
+    assert 角色们(管家) == ["system", "user", "assistant"]
+
+
+def test_流式_工具路第二轮逐片吐出(tmp_path, monkeypatch):
+    调用记录 = []
+
+    async def 假achat(messages, tools=None):
+        调用记录.append("第一轮")
+        return 假回复(None, [假工具调用()])
+
+    async def 假astream(messages):
+        调用记录.append("第二轮")
+        for 文本 in ["订单", " kx666 ", "正在配送中～"]:
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=文本))]
+            )
+
+    monkeypatch.setattr(main.llm, "achat", 假achat)
+    monkeypatch.setattr(main.llm, "astream", 假astream)
+    monkeypatch.setattr(graph.tools, "execute",
+                        lambda name, args, 当前用户=None: "订单 kx666，配送中")
+    管家 = 建管家(tmp_path)
+
+    片们 = _收集流(管家, "帮我查订单 kx666")
+
+    assert 片们 == ["订单", " kx666 ", "正在配送中～"]       # 真的一片一片来的
+    assert 调用记录 == ["第一轮", "第二轮"]                  # 第一轮不流，第二轮才流
+    assert 角色们(管家) == ["system", "user", "assistant", "tool", "assistant"]
+    assert 管家.messages[-1]["content"] == "订单 kx666 正在配送中～"
+
+
+def test_流式_报错给兜底并且照样落盘(tmp_path, monkeypatch):
+    async def 假achat(messages, tools=None):
+        raise RuntimeError("网络炸了")
+
+    monkeypatch.setattr(main.llm, "achat", 假achat)
+    管家 = 建管家(tmp_path)
+
+    片们 = _收集流(管家, "你好")
+
+    assert "".join(片们) == main.FALLBACK_REPLY
+    assert 角色们(管家) == ["system", "user", "assistant"]
+    存下来的 = json.loads((tmp_path / "memory_test.json").read_text(encoding="utf-8"))
+    assert 存下来的[-1]["content"] == main.FALLBACK_REPLY
