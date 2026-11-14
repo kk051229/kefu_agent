@@ -32,8 +32,9 @@ SYSTEM = """你是一名工作经验丰富、态度良好的专业客服。
 用户：你们几点下班？
 客服：您好～人工客服的服务时间是每天 9:00-21:00,其他时间我可以先帮您记录问题哦。
 
-用户：帮我查一下订单 kx666
-客服：帮您查到啦～订单 kx666 目前正在派送中，请您留意快递信息哦。"""
+用户：帮我查一下订单 A12345
+客服：帮您查到啦～订单 A12345 目前正在派送中，请您留意快递信息哦。
+（示例里的 A12345 是假单号，别用真订单号，免得模型把示例当成用户说过的话）"""
 
 
 llm = DeepSeekLLM()
@@ -267,6 +268,56 @@ async def answer_async(memory, q):
     return reply
 
 
+def 全角转半角(字):
+    """中文输入法打出来的"１２３"是全角字符，和"123"不是一回事，转一下。
+
+    全角字符的编码 = 半角编码 + 0xFEE0，所以减回去就行。
+    密码里几乎不会有中文，转错了也没损失。
+    """
+    if 字 == "　":                    # 全角空格
+        return " "
+    编码 = ord(字)
+    if 0xFF01 <= 编码 <= 0xFF5E:          # 全角 ！到 ～ 这一段
+        return chr(编码 - 0xFEE0)
+    return 字
+
+
+def 输入密码(提示="密码："):
+    """输密码：每按一个字打一个 *，让你看得见按进去了几个字。
+
+    为什么不用 getpass：Windows 上的 getpass 一个字符都不回显，
+    再加上输入法在中文模式时会吞掉数字键、或者打出全角的"１２３"，
+    看起来就像"键盘坏了"。自己读键盘、自己打 *、顺手转半角，
+    至少能立刻看出是没输进去、还是输错了。
+    """
+    import sys
+    if sys.platform != "win32":          # Mac/Linux 继续用 getpass（那边没有这些毛病）
+        return getpass.getpass(提示)
+
+    import msvcrt                         # Windows 专有的"读一个按键"模块
+
+    print(提示, end="", flush=True)
+    字符们 = []
+    while True:
+        字 = msvcrt.getwch()
+        if 字 in ("\r", "\n"):            # 回车：交卷
+            print()
+            return "".join(字符们)
+        if 字 == "\x03":                  # Ctrl+C：退出
+            print()
+            raise KeyboardInterrupt
+        if 字 == "\x08":                  # 退格：擦掉一个 *
+            if 字符们:
+                字符们.pop()
+                print("\b \b", end="", flush=True)
+            continue
+        if 字 in ("\x00", "\xe0"):        # 方向键之类：后面还跟着一个字节，吃掉
+            msvcrt.getwch()
+            continue
+        字符们.append(全角转半角(字))       # 全角的 １２３ → 半角的 123
+        print("*", end="", flush=True)
+
+
 def 终端登录():
     """终端版登录：验一遍账号密码，只带回 user_id。
 
@@ -278,7 +329,7 @@ def 终端登录():
     print("（演示账号：u001 / u002，密码 123456）")
     for _ in range(3):
         user_id = input("用户编号：").strip()
-        密码 = getpass.getpass("密码：")              # getpass：输入时屏幕上不显示
+        密码 = 输入密码("密码（输入法请切到英文）：")   # 每按一个字显示一个 *
         try:
             auth.登录(user_id, 密码)
         except auth.登录失败 as e:
